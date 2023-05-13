@@ -60,7 +60,7 @@ def sample_rays_np(H, W, f, c2w):
         H: 100
         W: 100
         f: 138.88887889922103
-        c2w: [4, 4]
+        c2w: [4, 4] 或 [3, 4]
 
     Returns:
 
