@@ -23,9 +23,9 @@ def pose_spherical(theta, phi, radius, trans_t, rot_phi, rot_theta):
     '''
 
     Args:
-        theta:
-        phi:
-        radius:
+        theta: 0.0-360.0
+        phi: -30.0
+        radius: 4.0
         trans_t:
         rot_phi:
         rot_theta:
@@ -36,7 +36,7 @@ def pose_spherical(theta, phi, radius, trans_t, rot_phi, rot_theta):
     c2w = trans_t(radius)
     c2w = rot_phi(phi/180.*np.pi) @ c2w
     c2w = rot_theta(theta/180.*np.pi) @ c2w
-    c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
+    c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w # [4, 4]
     return c2w
 
 
@@ -66,8 +66,8 @@ def make_mp4(net, H, W, focal, device, bound, N_samples, out_dir, f = 'video.mp4
     frames = []
     for th in tqdm(np.linspace(0., 360., 120, endpoint=False)):
         with torch.no_grad():
-            c2w = pose_spherical(th, -30., 4., trans_t, rot_phi, rot_theta)
-            rays_o, rays_d = sample_rays_np(H, W, focal, c2w[:3, :4]) # [h, w, 3]
+            c2w = pose_spherical(th, -30., 4., trans_t, rot_phi, rot_theta) # [4, 4] 
+            rays_o, rays_d = sample_rays_np(H, W, focal, c2w) # [h, w, 3] 
             # 逐行渲染，避免显卡过载
             rgb = []
             for i in range(H):
