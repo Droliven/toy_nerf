@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = str("2")
+os.environ["CUDA_VISIBLE_DEVICES"] = str("0") # 所使用的显卡的id
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 from run import Runner as RunnerNeRF
