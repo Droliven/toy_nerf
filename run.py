@@ -2,7 +2,7 @@
 Author: Droliven levondang@163.com
 Date: 2023-05-12 21:58:27
 LastEditors: Droliven levondang@163.com
-LastEditTime: 2023-05-12 22:00:11
+LastEditTime: 2023-05-13 16:12:01
 FilePath: \nerf_kunkun0w0\run.py
 Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 '''
@@ -25,6 +25,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from tensorboardX import SummaryWriter
 
 from model import NeRF
 from render import sample_rays_np, render_rays, creat_rays_for_batch_train
@@ -38,10 +39,12 @@ class Runner:
         # data_dir = r"H:\datas\generative_models\nerf_kunkun0w0"
         # data_dir = r"/home/songbo/server200/datas/nerf_kunkun0w0"
         # data_dir = r"/home/ml_group/songbo/server204/datasets/nerf_kunkun0w0"
-        epoch = 1
+        epoch = 50
 
         save_dir = "./ckpt"
         os.makedirs(save_dir, exist_ok=True)
+
+        summary = SummaryWriter(save_dir)
 
         torch.manual_seed(999)
         np.random.seed(666)
@@ -73,12 +76,13 @@ class Runner:
         # training parameters
         #############################
         N = rays.shape[0]
-        Batch_size = 4096
+        Batch_size = 1024 # 4096
         iterations = N // Batch_size
-        print(f"There are {iterations} batches of rays and each batch contains {Batch_size} rays")
 
-        bound = (2., 6.) # todo:
-        N_samples = (64, None) # todo: 两阶段每条光线采样微元数
+        bound = (2., 6.)  # todo:
+        N_samples = (192, 64)  # todo: 两阶段每条光线采样微元数
+
+        print(f"batches num: {iterations}, each batch rays: {Batch_size}, rays between: [{bound[0]}, {bound[1]}], volumes num: [{N_samples[0]}, {N_samples[1]}]")
 
         #############################
         # test data
@@ -96,6 +100,8 @@ class Runner:
         mse = torch.nn.MSELoss()
 
         for e in range(epoch):
+            avg_loss = 0
+
             # create iteration for training
             rays = rays[torch.randperm(N), :] # 随机洗牌
             train_iter = iter(torch.split(rays, Batch_size, dim=0))
@@ -118,6 +124,11 @@ class Runner:
                     p_bar.set_postfix({'loss': '{0:1.5f}'.format(loss.item())})
                     p_bar.update(1)
 
+                    avg_loss += loss.item()
+            
+            avg_loss /= (i+1)
+            summary.add_scalar("loss", avg_loss, e + 1)
+
             with torch.no_grad():
                 rgb_list = list()
                 for j in range(test_rays_o.shape[0]):
@@ -129,6 +140,7 @@ class Runner:
                 psnr = -10. * torch.log(loss).item() / torch.log(torch.tensor([10.]))
                 print(f"PSNR={psnr.item()}")
 
+                summary.add_scalar("psnr", psnr.item(), e+1)
 
             torch.save({
                 "model": net.state_dict(),

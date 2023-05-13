@@ -75,42 +75,42 @@ def sample_rays_np(H, W, f, c2w):
 # Hierarchical sampling (section 5.2)
 def sample_pdf_point(bins, weights, N_samples, device):
     '''
-
+    依据光线的积分系数 -> 概率密度，再基于概率密度有侧重性地采样一些重要位置的微元
     Args:
-        bins:
-        weights:
-        N_samples:
+        bins: uniformN - 1
+        weights: [b, uniformN - 2]
+        N_samples: 第二阶段采样数目
         device:
 
     Returns:
 
     '''
-    pdf = F.normalize(weights, p=1, dim=-1)
-    cdf = torch.cumsum(pdf, -1)
-    cdf = torch.cat([torch.zeros_like(cdf[..., :1]), cdf], -1)
+    pdf = F.normalize(weights, p=1, dim=-1) # 概率密度 [b, bins-1]
+    cdf = torch.cumsum(pdf, -1) # 累积分布函数 [b, bins-1]
+    cdf = torch.cat([torch.zeros_like(cdf[..., :1]), cdf], -1) # [b, bins]
 
     # uniform sampling
-    u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=device).contiguous()
+    u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=device).contiguous() # [b, importantN]
 
     # invert
-    ids = torch.searchsorted(cdf, u, right=True)
-    below = torch.max(torch.zeros_like(ids - 1, device=device), ids - 1)
-    above = torch.min((cdf.shape[-1] - 1) * torch.ones_like(ids, device=device), ids)
-    ids_g = torch.stack([below, above], -1)
+    ids = torch.searchsorted(cdf, u, right=True) # [b, importantN] # todo:
+    below = torch.max(torch.zeros_like(ids - 1, device=device), ids - 1) # [b, importantN]
+    above = torch.min((cdf.shape[-1] - 1) * torch.ones_like(ids, device=device), ids) # [b, importantN]
+    ids_g = torch.stack([below, above], -1) # [b, importantN, 2]
     # ids_g => (batch, N_samples, 2)
 
     # matched_shape : [batch, N_samples, bins]
-    matched_shape = [ids_g.shape[0], ids_g.shape[1], cdf.shape[-1]]
+    matched_shape = [ids_g.shape[0], ids_g.shape[1], cdf.shape[-1]] # [b, importantN, bins]
     # gather cdf value
-    cdf_val = torch.gather(cdf.unsqueeze(1).expand(matched_shape), -1, ids_g)
+    cdf_val = torch.gather(cdf.unsqueeze(1).expand(matched_shape), -1, ids_g) # [b, importantN, 2], todo:
     # gather z_val
-    bins_val = torch.gather(bins[None, None, :].expand(matched_shape), -1, ids_g)
+    bins_val = torch.gather(bins[None, None, :].expand(matched_shape), -1, ids_g) # [b, importantN, 2]
 
     # get z_val for the fine sampling
-    cdf_d = (cdf_val[..., 1] - cdf_val[..., 0])
+    cdf_d = (cdf_val[..., 1] - cdf_val[..., 0]) # [b, importantN]
     cdf_d = torch.where(cdf_d < 1e-5, torch.ones_like(cdf_d, device=device), cdf_d)
-    t = (u - cdf_val[..., 0]) / cdf_d
-    samples = bins_val[..., 0] + t * (bins_val[..., 1] - bins_val[..., 0])
+    t = (u - cdf_val[..., 0]) / cdf_d # [b, importantN]
+    samples = bins_val[..., 0] + t * (bins_val[..., 1] - bins_val[..., 0]) # [b, importantN]
 
     return samples
 
@@ -136,7 +136,7 @@ def uniform_sample_point(tn, tf, N_samples, device):
 
 def get_rgb_w(net, pts, rays_d, z_vals, device, noise_std=.0, use_view=True):
     '''
-    给定一个 Batch 的位置、光向、z, 计算
+    给定一个 Batch 的位置、光向、z, 计算颜色与其积分系数
     Args:
         net: NeRF
         pts: [n, 3]
@@ -202,21 +202,22 @@ def render_rays(net, rays, bound, N_samples, device, noise_std=.0, use_view=Fals
     uniform_N, important_N = N_samples
     z_vals = uniform_sample_point(near, far, uniform_N, device) #  在光线起止位置之间，按照均匀分布随机采样 N 个点的位置
 
-    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., None]
+    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., None] # [b, sampleN, 3]
     # pts => tensor(Batch_Size, uniform_N, 3)
     # rays_o, rays_d => tensor(Batch_Size, 3)
 
     # Run network
     if important_N is not None:
         with torch.no_grad():
-            rgb, weights = get_rgb_w(net, pts, rays_d, z_vals, device, noise_std=noise_std, use_view=use_view)
+            rgb, weights = get_rgb_w(net, pts, rays_d, z_vals, device, noise_std=noise_std, use_view=use_view) # [b, uniformN, 3], [b, uniformN]
             z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-            samples = sample_pdf_point(z_vals_mid, weights[..., 1:-1], important_N, device)
+            samples = sample_pdf_point(z_vals_mid, weights[..., 1:-1], important_N, device) # [b, importantN]
 
         z_vals = z_vals.unsqueeze(0).expand([bs, uniform_N])
-        z_vals, _ = torch.sort(torch.cat([z_vals, samples], dim=-1), dim=-1)
-        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., None]
+        z_vals, _ = torch.sort(torch.cat([z_vals, samples], dim=-1), dim=-1) # [b, uniformN+importantN]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., None] # [b, uniformN+importantN, 3]
 
+    # todo: 体素微元太多的话，这行 CUDA 过不了
     rgb, weights = get_rgb_w(net, pts, rays_d, z_vals, device, noise_std=noise_std, use_view=use_view)
 
     rgb_map = torch.sum(weights[..., None] * rgb, dim=-2)
